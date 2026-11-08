@@ -39,7 +39,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     (apt-get --yes install --no-install-recommends clang-format ||  \
     apt-get --yes install --no-install-recommends /tmp/debian-pkgs/clang-format-fix.deb) && \
     apt-get --yes install --no-install-recommends \
-    locales sudo git make cmake ninja-build gcc g++ g++-mingw-w64-x86-64 gdb-mingw-w64-target ccache gdb gdbserver \
+    locales sudo git make cmake ninja-build file gcc g++ g++-mingw-w64-x86-64 gdb-mingw-w64-target ccache gdb gdbserver \
     valgrind chrpath dpkg-dev patchelf bindfs fuse-zip exif doxygen graphviz dialog jq recode pcregrep \
     default-jre-headless joe mc colordiff dos2unix shfmt pkg-config \
     python3 python3-venv python3-dev python3-pefile python3-pyelftools python3-requests python-is-python3 \

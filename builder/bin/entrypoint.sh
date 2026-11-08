@@ -17,7 +17,7 @@ function WriteLog {
 # Arg2: ${BASH_LINENO}
 # Arg3: ${BASH_COMMAND}
 #
-function ScriptExit {
+function script_exit {
 	local exitcode="${?}" idx line file func
 	# Show the stack in case of an error.
 	if [[ "${exitcode}" -ne 0 ]]; then
@@ -41,10 +41,19 @@ function ScriptExit {
 WriteLog "Entrypoint as user ($(id -u)) with command:" "${@}"
 
 ## Trap script exit with function.
-trap 'ScriptExit "${BASH_SOURCE}" "${BASH_LINENO}" "${BASH_COMMAND}"' EXIT
+trap 'script_exit "${BASH_SOURCE}" "${BASH_LINENO}" "${BASH_COMMAND}"' EXIT
 
-# Check if root is executing the entrypoint.
-if [[ "$(id -u)" -eq 0 ]]; then
+# Creates the user 'user' environment.
+function create_user_env {
+	local sentry_file zip_file base_app_dir wine_apps_zip_dir app_dir mount_dir zip_files
+	sentry_file="/.entrypoint.sentry"
+	# When the sentry file exists return early.
+	if [[ -f "${sentry_file}" ]]; then
+		WriteLog "Bailing out, sentry file exists: ${sentry_file}"
+		return 0
+	fi
+	# Prevent reentry using a sentry file.
+	touch "${sentry_file}"
 	# When the LOCAL user id and group are not given.
 	if [[ -n "${LOCAL_USER}" ]]; then
 		WriteLog "User uid:gid from passed environment variable 'LOCAL_USER': ${LOCAL_USER}"
@@ -61,15 +70,14 @@ if [[ "$(id -u)" -eq 0 ]]; then
 	fi
 	usermod --uid "$(echo "${LOCAL_USER}" | cut --delimiter=: -f1)" user || exit 1
 	groupmod --gid "$(echo "${LOCAL_USER}" | cut --delimiter=: -f2)" user || exit 1
-	usermod --append --groups "${WINE_USER}" user || exit 1
 	# Change the owner of 'user' home directory and all in the 'bin' directory.
 	chown user:user ~user
 	# Change the ownership of a possible the existing temporary wine directory created during the image building.
 	chown user:user --recursive /tmp/wine-* >/dev/null 2>&1 || true
-	#chown user:user -R ~user/.wine
 	chown user:user --recursive ~user/bin
 	# Add symlink to project mount when it exists.
 	[[ -d /mnt/project && ! -L ~/project ]] && ln --symbolic /mnt/project ~/project
+
 	# Check if the wine-prefix directory available.
 	if [[ -d "${WINEPREFIX}" ]]; then
 		bind_dir="${HOME}/.wine"
@@ -81,7 +89,6 @@ if [[ "$(id -u)" -eq 0 ]]; then
 		WriteLog "Wine prefix '${WINEPREFIX}' bound to: ${bind_dir}"
 		# Reassign the Wine prefix to the new bind.
 		WINEPREFIX="${bind_dir}"
-		
 		# Check if an import registry is available.
 		if [[ -f "${HOME}/import.reg" ]]; then
 			WriteLog "Importing registry file: ${HOME}/import.reg"
@@ -122,7 +129,6 @@ if [[ "$(id -u)" -eq 0 ]]; then
 			fi
 		fi
 	fi
-
 	# Get the tool-combi file for mounting.
 	mapfile -d '' zip_files < <(find "${HOME}" -maxdepth 1 -type f \( -name "tool-combi.zip" -o -name "tool-combi.tar.gz" \) -print0)
 	# Mount the combination of tools.
@@ -136,7 +142,6 @@ if [[ "$(id -u)" -eq 0 ]]; then
 			fi
 		fi
 	done
-
 	# Get all the of the toolchain compressed-files.
 	mapfile -d '' zip_files < <(find "${HOME}" -maxdepth 1 -type f \( -name "toolchain-*.zip" -o -name "toolchain-*.tar.gz" \) -print0)
 	# Check if toolchain files were found.
@@ -149,7 +154,6 @@ if [[ "$(id -u)" -eq 0 ]]; then
 			WriteLog "Compressed toolchain files are mounted on: ${mount_dir}"
 		fi
 	fi
-
 	# Check if the Qt compressed libraries are available.
 	local_mount="/usr/local/lib/qt"
 	WriteLog "Checking for mount at: ${local_mount}"
@@ -216,7 +220,7 @@ if [[ "$(id -u)" -eq 0 ]]; then
 			mv "${arch_qt_ver_dir['lnx-aarch64']}/gcc_64/libexec-tmp" "${arch_qt_ver_dir['lnx-aarch64']}/gcc_64/libexec"
 		fi
 	fi
-
+	#
 	WriteLog "Working directory: $(pwd)"
 	# With this file a ssh session get the variable.
 	mkdir --mode=0775 "${HOME}/.ssh"
@@ -231,7 +235,6 @@ if [[ "$(id -u)" -eq 0 ]]; then
 	# Create the environment file for the executing user.
 	echo "#!/usr/bin/env bash" >"${HOME}/.environment.sh"
 	chmod +rx "${HOME}/.environment.sh"
-
 	# Check if the host has the X11 display passed.
 	if [[ -n "${DISPLAY}" && -f "${HOME}/.Xauthority" ]]; then
 		# Create file for profile to import to be used when running sshd.
@@ -249,10 +252,21 @@ if [[ "$(id -u)" -eq 0 ]]; then
 			--load="module-null-sink sink_name=dummy sink_properties=device.description=Dummy"
 		sudo --user=user --chdir="$(pwd)" -- pactl set-default-sink dummy
 	fi
-
 	# Prevent any errors when resolving git tags.
 	git config --global --add safe.directory '*'
+}
 
+# Check if root is executing the entrypoint.
+if [[ "$(id -u)" -eq 0 ]]; then
+	# Assign the home directory environment variable since GitHub assigns a different one.
+	if [[ "${GITHUB_ACTIONS}" == "true" ]]; then
+		HOME=~user
+		WriteLog "GitHub Actions, assign home directory: ${HOME}"
+		LOCAL_USER="$(stat "${PWD}" --format='%u:%g')"
+		WriteLog "GitHub Actions, force (uid:gid) from working dir: ${LOCAL_USER}"
+	fi
+	# Create the users environment.
+	create_user_env
 	# Execute CMD passed by the user when starting the image.
 	if [[ $# -ne 0 ]]; then
 		WriteLog "Executing as 'user' the command: " "${@}"
